@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # -------- Builder stage --------
-FROM rust:1.82-bullseye AS builder
+FROM rust:nightly-bullseye AS builder
 WORKDIR /app
 
 # Cache dependencies
