@@ -1,173 +1,61 @@
 use axum::{
-    extract::{Path, State}, http::StatusCode, routing::{get, post}, Json, Router
+    routing::{get, post},
+    Router,
 };
-use serde::{Deserialize, Serialize};
-use sqlx::{prelude::FromRow, Error, SqlitePool};
+use dotenvy::dotenv;
+use tracing_subscriber;
+
+mod db;
+mod models;
+mod handlers;
+
+use db::{init_pool, run_migrations};
+use handlers::{root, create_user, create_todo, get_todo, list_todo, update_todo, delete_todo, db_health};
 
 #[tokio::main]
-async fn main() -> Result<(), sqlx::Error> {
-    // initialize tracing
+async fn main() {
     tracing_subscriber::fmt::init();
-    let pool = SqlitePool::connect("sqlite://todos.db").await?;
-    // let todos = Arc::new(Mutex::new(Vec::<Todo>::new()));
+    dotenv().ok();
 
-    // build our application with a route
-    let app = Router::new()
-        // `GET /` goes to `root`
-        .route("/", get(root))
-        // `POST /users` goes to `create_user`
-        .route("/users", post(create_user))
-        .route(
-            "/todos",
-            post(create_todo)
-            .get(list_todo)
-        )
-        .route(
-            "/todo/{id}",
-            get(get_todo)
-            .put(update_todo)
-            .delete(delete_todo)
-        )
-        .with_state(pool);
-    // run our app with hyper, listening globally on port 3000
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    axum::serve(listener, app).await?;
+    // Log backend (postgres-only)
+    println!("starting server with backend: postgres");
 
-    Ok(())
-}
+    if let Some(url) = std::env::var("DATABASE_URL").ok() {
+        println!("DATABASE_URL detected: {}", url);
+    } else {
+        println!("DATABASE_URL not set; relying on PG* env vars");
+    }
 
-// basic handler that responds with a static string
-async fn root() -> &'static str {
-    "Hello, World!"
-}
-
-async fn create_user(
-    // this argument tells axum to parse the request body
-    // as JSON into a `CreateUser` type
-    Json(payload): Json<CreateUser>,
-) -> (StatusCode, Json<User>) {
-    // insert your application logic here
-    let user = User {
-        id: 1337,
-        username: payload.username,
+    let pool = match init_pool().await {
+        Ok(pool) => pool,
+        Err(e) => {
+            eprintln!("failed to initialize database pool: {}", e);
+            return;
+        }
     };
 
-    // this will be converted into a JSON response
-    // with a status code of `201 Created`
-    (StatusCode::CREATED, Json(user))
-}
-
-async fn create_todo(
-    State(pool): State<SqlitePool>,
-    Json(payload): Json<CreateTodo>,
-) -> Result<Json<Todo>,  StatusCode> {
-    let todo = sqlx::query_as::<_, Todo>("
-        INSERT INTO todos (title, done) VALUES (?, 0) RETURNING id, title, done
-    ")
-    .bind(payload.title)
-    .fetch_one(&pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(todo))
-}
-
-async fn get_todo (
-    Path(id): Path<i64>,
-    State(pool): State<SqlitePool>,
-) -> Result<Json<Todo>, StatusCode> {
-    let result = sqlx::query_as::<_, Todo>("
-        SELECT * FROM todos WHERE id = ?
-    ")
-    .bind(id)
-    .fetch_one(&pool)
-    .await;
-
-    match result {
-        Ok(todo) => Ok(Json(todo)),
-        Err(Error::RowNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    if let Err(e) = run_migrations(&pool).await {
+        eprintln!("failed to run migrations: {}", e);
+        return;
     }
-}
 
-async fn update_todo (
-    Path(id): Path<i64>,
-    State(pool): State<SqlitePool>,
-    Json(payload): Json<UpdateTodo>,
-) -> Result<Json<Todo>, StatusCode> {
-    let result = sqlx::query_as::<_, Todo>("
-        UPDATE todos SET done = ? WHERE id = ? RETURNING id, title, done
-    ")
-    .bind(payload.done)
-    .bind(id)
-    .fetch_one(&pool)
-    .await;
+    let app = Router::new()
+        .route("/", get(root))
+        .route("/users", post(create_user))
+        .route("/todos", post(create_todo).get(list_todo))
+        .route("/todos/:id", get(get_todo).put(update_todo).delete(delete_todo))
+        .route("/healthz/db", get(db_health))
+        .with_state(pool);
 
-    match result {
-        Ok(todo) => Ok(Json(todo)),
-        Err(Error::RowNotFound) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let addr = format!("0.0.0.0:{}", port);
+    match tokio::net::TcpListener::bind(&addr).await {
+        Ok(listener) => {
+            println!("listening on {}", addr);
+            if let Err(e) = axum::serve(listener, app).await {
+                eprintln!("server error: {}", e);
+            }
+        }
+        Err(e) => eprintln!("failed to bind listener: {}", e),
     }
-}
-
-async fn delete_todo (
-    Path(id): Path<i64>,
-    State(pool): State<SqlitePool>
-) -> Result<StatusCode, StatusCode> {
-    let result = sqlx::query("
-        DELETE FROM todos WHERE id = ?
-    ")
-    .bind(id)
-    .execute(&pool)
-    .await;
-
-    match result {
-        Ok(r) if r.rows_affected() > 0 => Ok(StatusCode::NO_CONTENT),
-        Ok(_) => Err(StatusCode::NOT_FOUND),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
-    }
-}
-
-
-async fn list_todo(
-    State(pool): State<SqlitePool>
-) -> Result<Json<Vec<Todo>>, StatusCode> {
-    let todos = sqlx::query_as::<_, Todo>("
-        SELECT * FROM todos
-    ")
-    .fetch_all(&pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Json(todos))
-}
-
-// the input to our `create_user` handler
-#[derive(Deserialize)]
-struct CreateUser {
-    username: String,
-}
-
-// the output to our `create_user` handler
-#[derive(Serialize)]
-struct User {
-    id: i64,
-    username: String,
-}
-
-#[derive(Deserialize)]
-struct CreateTodo {
-    title: String,
-}
-
-#[derive(Deserialize)]
-struct UpdateTodo {
-    done: bool,
-}
-
-#[derive(Serialize, Deserialize, Clone, FromRow)]
-struct Todo {
-    id: i64,
-    title: String,
-    done: bool,
 }
