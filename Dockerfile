@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # -------- Builder stage --------
-FROM rust:nightly AS builder
+FROM rustlang/rust:nightly AS builder
 WORKDIR /app
 
 # Cache dependencies
