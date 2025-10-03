@@ -13,8 +13,10 @@ pub async fn init_pool() -> Result<DbPool, sqlx::Error> {
         // Convert missing env vars into sqlx::Error::Configuration for consistent error type
         let host = std::env::var("PGHOST").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
         let user = std::env::var("PGUSER").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
-        let password = std::env::var("PGPASSWORD").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
-        let database = std::env::var("PGDATABASE").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
+        let password =
+            std::env::var("PGPASSWORD").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
+        let database =
+            std::env::var("PGDATABASE").map_err(|e| sqlx::Error::Configuration(Box::new(e)))?;
 
         let options = PgConnectOptions::new()
             .host(&host)

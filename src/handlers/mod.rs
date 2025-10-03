@@ -1,18 +1,16 @@
 mod todo;
 
-use axum::{http::StatusCode, Json};
-use sqlx::PgPool;
 use crate::models::{CreateUser, User};
 use axum::extract::State;
+use axum::{http::StatusCode, Json};
+use sqlx::PgPool;
 
 // root handler
 pub async fn root() -> &'static str {
     "Hello, World!"
 }
 
-pub async fn create_user(
-    Json(payload): Json<CreateUser>,
-) -> (StatusCode, Json<User>) {
+pub async fn create_user(Json(payload): Json<CreateUser>) -> (StatusCode, Json<User>) {
     let user = User {
         id: 1337,
         username: payload.username,

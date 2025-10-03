@@ -5,7 +5,10 @@ use axum::{
 };
 use sqlx::Error;
 
-use crate::{db::DbPool, models::{CreateTodo, UpdateTodo, Todo}};
+use crate::{
+    db::DbPool,
+    models::{CreateTodo, Todo, UpdateTodo},
+};
 
 pub async fn create_todo(
     State(pool): State<DbPool>,
@@ -66,10 +69,7 @@ pub async fn delete_todo(
 ) -> Result<StatusCode, StatusCode> {
     let query = "DELETE FROM todos WHERE id = $1";
 
-    let result = sqlx::query(query)
-        .bind(id)
-        .execute(&pool)
-        .await;
+    let result = sqlx::query(query).bind(id).execute(&pool).await;
 
     match result {
         Ok(r) if r.rows_affected() > 0 => Ok(StatusCode::NO_CONTENT),
@@ -78,9 +78,7 @@ pub async fn delete_todo(
     }
 }
 
-pub async fn list_todo(
-    State(pool): State<DbPool>,
-) -> Result<Json<Vec<Todo>>, StatusCode> {
+pub async fn list_todo(State(pool): State<DbPool>) -> Result<Json<Vec<Todo>>, StatusCode> {
     let todos = sqlx::query_as::<_, Todo>("SELECT * FROM todos")
         .fetch_all(&pool)
         .await
