@@ -11,3 +11,7 @@ serde_json = "1"
 tracing-subscriber = "0.3"
 dotenvy = "0.15"
 sqlx = { version = "0.7", default-features = false, features = ["runtime-tokio", "macros", "tls-rustls", "postgres", "migrate"] }
+
+[patch.crates-io]
+# Work around crates requiring Cargo edition2024 on older toolchains in Cloud Build
+base64ct = "=1.7.0"
